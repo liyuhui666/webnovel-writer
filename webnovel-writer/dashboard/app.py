@@ -24,6 +24,7 @@ from .watcher import FileWatcher
 # 全局状态
 # ---------------------------------------------------------------------------
 _project_root: Path | None = None
+_workspace_root: Path | None = None
 _watcher = FileWatcher()
 
 STATIC_DIR = Path(__file__).parent / "frontend" / "dist"
@@ -39,15 +40,28 @@ def _webnovel_dir() -> Path:
     return _get_project_root() / ".webnovel"
 
 
+def _get_workspace_root() -> Path:
+    if _workspace_root is not None:
+        return _workspace_root
+    # 默认使用项目根目录的父目录作为工作区
+    return _get_project_root().parent
+
+
 # ---------------------------------------------------------------------------
 # 应用工厂
 # ---------------------------------------------------------------------------
 
-def create_app(project_root: str | Path | None = None) -> FastAPI:
-    global _project_root
+def create_app(project_root: str | Path | None = None, workspace_root: str | Path | None = None) -> FastAPI:
+    global _project_root, _workspace_root
 
     if project_root:
         _project_root = Path(project_root).resolve()
+
+    if workspace_root:
+        _workspace_root = Path(workspace_root).resolve()
+    elif _project_root:
+        # 默认使用项目父目录作为工作区
+        _workspace_root = _project_root.parent
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
@@ -374,6 +388,163 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
             content = "[二进制文件，无法预览]"
 
         return {"path": path, "content": content}
+
+    # ===========================================================
+    # API：项目管理（多项目切换）
+    # ===========================================================
+
+    class CreateProjectRequest(BaseModel):
+        title: str
+        genre: str
+        project_dir: Optional[str] = None
+        protagonist_name: Optional[str] = ""
+        target_chapters: Optional[int] = 600
+        golden_finger_name: Optional[str] = ""
+        golden_finger_type: Optional[str] = ""
+        core_selling_points: Optional[str] = ""
+
+    @app.get("/api/projects/list")
+    def list_projects():
+        """列出工作区中的所有项目。"""
+        workspace = _get_workspace_root()
+        projects = []
+
+        # 搜索工作区下的所有 .webnovel 目录
+        for item in workspace.iterdir():
+            if item.is_dir() and not item.name.startswith('.') and not item.name.startswith('_'):
+                webnovel_dir = item / ".webnovel"
+                state_file = webnovel_dir / "state.json"
+                if state_file.is_file():
+                    try:
+                        state = json.loads(state_file.read_text(encoding="utf-8"))
+                        project_info = state.get("project_info", {})
+                        progress = state.get("progress", {})
+
+                        projects.append({
+                            "id": item.name,
+                            "path": str(item.resolve()),
+                            "title": project_info.get("title", item.name),
+                            "genre": project_info.get("genre", "未知"),
+                            "current_chapter": progress.get("current_chapter", 0),
+                            "total_words": progress.get("total_words", 0),
+                            "target_chapters": project_info.get("target_chapters", 0),
+                            "is_active": str(item.resolve()) == str(_get_project_root().resolve()),
+                        })
+                    except Exception:
+                        # 跳过无法解析的项目
+                        pass
+
+        return {"projects": sorted(projects, key=lambda x: x["title"]), "workspace": str(workspace)}
+
+    @app.get("/api/projects/current")
+    def get_current_project():
+        """获取当前项目信息。"""
+        root = _get_project_root()
+        state_file = root / ".webnovel" / "state.json"
+
+        if not state_file.is_file():
+            raise HTTPException(404, "当前项目状态文件不存在")
+
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            return {
+                "id": root.name,
+                "path": str(root),
+                "title": state.get("project_info", {}).get("title", root.name),
+                "genre": state.get("project_info", {}).get("genre", "未知"),
+                "is_active": True,
+            }
+        except Exception as e:
+            raise HTTPException(500, f"读取项目信息失败: {e}")
+
+    class SwitchProjectRequest(BaseModel):
+        path: str
+
+    @app.post("/api/projects/switch")
+    async def switch_project(request: SwitchProjectRequest):
+        """切换当前项目（通过更新 .claude 指针文件）。"""
+        global _project_root, _watcher
+
+        project_path = request.path
+        if not project_path:
+            raise HTTPException(400, "缺少项目路径")
+
+        new_root = Path(project_path).resolve()
+
+        # 验证新项目是有效的 webnovel 项目
+        if not (new_root / ".webnovel" / "state.json").is_file():
+            raise HTTPException(400, "目标目录不是有效的 webnovel 项目")
+
+        # 更新指针文件
+        try:
+            cwd = Path.cwd()
+            pointer = cwd / ".claude" / ".webnovel-current-project"
+            pointer.parent.mkdir(parents=True, exist_ok=True)
+            pointer.write_text(str(new_root), encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(500, f"更新项目指针失败: {e}")
+
+        # 更新全局状态
+        _project_root = new_root
+
+        # 重启文件监控
+        webnovel = _webnovel_dir()
+        _watcher.stop()
+        if webnovel.is_dir():
+            _watcher.start(webnovel, asyncio.get_running_loop())
+
+        return {"success": True, "message": f"已切换到项目: {new_root.name}", "path": str(new_root)}
+
+    @app.post("/api/projects/create")
+    def create_project(request: CreateProjectRequest):
+        """创建新项目。"""
+        workspace = _get_workspace_root()
+
+        # 确定项目目录
+        if request.project_dir:
+            project_dir = workspace / request.project_dir
+        else:
+            # 使用书名作为目录名（简化处理）
+            safe_name = request.title.replace(" ", "_").replace("/", "_")
+            project_dir = workspace / safe_name
+
+        # 检查目录是否已存在
+        if project_dir.exists():
+            raise HTTPException(409, f"目录已存在: {project_dir.name}")
+
+        # 调用 init_project 逻辑
+        try:
+            # 导入 init_project 模块
+            import sys
+            scripts_path = Path(__file__).parent.parent / "scripts"
+            if str(scripts_path) not in sys.path:
+                sys.path.insert(0, str(scripts_path))
+
+            from init_project import init_project
+
+            init_project(
+                project_dir=str(project_dir),
+                title=request.title,
+                genre=request.genre,
+                protagonist_name=request.protagonist_name or "",
+                target_chapters=request.target_chapters or 600,
+                golden_finger_name=request.golden_finger_name or "",
+                golden_finger_type=request.golden_finger_type or "",
+                core_selling_points=request.core_selling_points or "",
+            )
+
+            return {
+                "success": True,
+                "message": f"项目创建成功: {request.title}",
+                "path": str(project_dir),
+                "project_id": project_dir.name,
+            }
+        except Exception as e:
+            # 清理已创建的目录
+            if project_dir.exists():
+                import shutil
+                shutil.rmtree(project_dir, ignore_errors=True)
+            raise HTTPException(500, f"创建项目失败: {e}")
 
     # ===========================================================
     # API：文档编辑（保存文件）

@@ -59,6 +59,64 @@ export async function createFile(path, content = '') {
 }
 
 /**
+ * 获取所有项目列表
+ * @returns {Promise<object>} - 项目列表
+ */
+export async function listProjects() {
+    return fetchJSON('/api/projects/list');
+}
+
+/**
+ * 获取当前项目信息
+ * @returns {Promise<object>} - 当前项目
+ */
+export async function getCurrentProject() {
+    return fetchJSON('/api/projects/current');
+}
+
+/**
+ * 切换当前项目
+ * @param {string} path - 项目路径
+ * @returns {Promise<object>} - 切换结果
+ */
+export async function switchProject(path) {
+    const url = new URL('/api/projects/switch', window.location.origin);
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '切换失败' }));
+        throw new Error(err.detail || `${res.status} ${res.statusText}`);
+    }
+    return res.json();
+}
+
+/**
+ * 创建新项目
+ * @param {object} project - 项目信息
+ * @returns {Promise<object>} - 创建结果
+ */
+export async function createProject(project) {
+    const url = new URL('/api/projects/create', window.location.origin);
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(project),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '创建失败' }));
+        throw new Error(err.detail || `${res.status} ${res.statusText}`);
+    }
+    return res.json();
+}
+
+/**
  * 订阅 SSE 实时事件流
  * @param {function} onMessage  收到 data 时回调
  * @param {{onOpen?: function, onError?: function}} handlers 连接状态回调

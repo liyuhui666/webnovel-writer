@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchJSON, subscribeSSE, saveFile, createFile } from './api.js'
+import { fetchJSON, subscribeSSE, saveFile, createFile, listProjects, getCurrentProject, switchProject, createProject } from './api.js'
 import ForceGraph3D from 'react-force-graph-3d'
 
 // ====================================================================
@@ -12,13 +12,73 @@ export default function App() {
     const [refreshKey, setRefreshKey] = useState(0)
     const [connected, setConnected] = useState(false)
 
+    // 项目相关状态
+    const [projects, setProjects] = useState([])
+    const [currentProject, setCurrentProject] = useState(null)
+    const [showProjectSelector, setShowProjectSelector] = useState(false)
+    const [showCreateProjectModal, setShowCreateProjectModal] = useState(false)
+    const [isSwitching, setIsSwitching] = useState(false)
+
+    // 题材结构：大类 -> 细分题材
+    const GENRE_CATEGORIES = {
+        '玄幻修仙': ['修仙', '系统流', '高武', '西幻', '无限流', '末世', '科幻'],
+        '都市现代': ['都市异能', '都市日常', '都市脑洞', '现实题材', '黑暗题材', '电竞', '直播文'],
+        '言情': ['古言', '宫斗宅斗', '青春甜宠', '豪门总裁', '职场婚恋', '民国言情', '幻想言情', '现言脑洞', '女频悬疑', '狗血言情', '替身文', '多子多福', '种田', '年代'],
+        '特殊题材': ['规则怪谈', '悬疑脑洞', '悬疑灵异', '历史古代', '历史脑洞', '游戏体育', '抗战谍战', '知乎短篇', '克苏鲁']
+    }
+
+    // 平铺所有细分题材（用于主题材选择）
+    const ALL_GENRES = Object.values(GENRE_CATEGORIES).flat()
+
+    // 新建项目表单
+    const [newProjectForm, setNewProjectForm] = useState({
+        title: '',
+        mainGenre: '',
+        subGenre: '',
+        protagonist_name: '',
+        target_chapters: 600,
+    })
+
+    // 获取主题材的分类
+    const getGenreCategory = (genre) => {
+        for (const [category, genres] of Object.entries(GENRE_CATEGORIES)) {
+            if (genres.includes(genre)) return category
+        }
+        return ''
+    }
+
+    // 获取可选的副题材列表（排除已选的主题材）
+    const getSubGenres = (mainGenre) => {
+        return ALL_GENRES.filter(g => g !== mainGenre)
+    }
+
+    // 组合题材显示
+    const getFullGenre = () => {
+        const { mainGenre, subGenre } = newProjectForm
+        if (!mainGenre) return ''
+        if (!subGenre) return mainGenre
+        return `${mainGenre}+${subGenre}`
+    }
+
     const loadProjectInfo = useCallback(() => {
         fetchJSON('/api/project/info')
             .then(setProjectInfo)
             .catch(() => setProjectInfo(null))
     }, [])
 
+    const loadProjects = useCallback(() => {
+        listProjects().then(data => {
+            setProjects(data.projects || [])
+        }).catch(() => setProjects([]))
+
+        getCurrentProject().then(data => {
+            setCurrentProject(data)
+        }).catch(() => setCurrentProject(null))
+    }, [])
+
     useEffect(() => { loadProjectInfo() }, [loadProjectInfo, refreshKey])
+
+    useEffect(() => { loadProjects() }, [loadProjects])
 
     // SSE 订阅
     useEffect(() => {
@@ -34,6 +94,52 @@ export default function App() {
         return () => { unsub(); setConnected(false) }
     }, [])
 
+    const handleSwitchProject = async (projectPath) => {
+        setIsSwitching(true)
+        try {
+            await switchProject(projectPath)
+            // 切换成功后刷新页面
+            window.location.reload()
+        } catch (e) {
+            alert(`切换项目失败: ${e.message}`)
+            setIsSwitching(false)
+        }
+    }
+
+    const handleCreateProject = async () => {
+        if (!newProjectForm.title) {
+            alert('请输入书名')
+            return
+        }
+        if (!newProjectForm.mainGenre) {
+            alert('请选择主题材')
+            return
+        }
+        try {
+            // 组合主题材和副题材
+            const fullGenre = getFullGenre()
+            const result = await createProject({
+                ...newProjectForm,
+                genre: fullGenre,
+            })
+            setShowCreateProjectModal(false)
+            // 重置表单
+            setNewProjectForm({
+                title: '',
+                mainGenre: '',
+                subGenre: '',
+                protagonist_name: '',
+                target_chapters: 600,
+            })
+            // 使用返回的路径切换到新项目
+            if (result.path) {
+                handleSwitchProject(result.path)
+            }
+        } catch (e) {
+            alert(`创建项目失败: ${e.message}`)
+        }
+    }
+
     const title = projectInfo?.project_info?.title || '未加载'
 
     return (
@@ -42,6 +148,51 @@ export default function App() {
                 <div className="sidebar-header">
                     <h1>PIXEL WRITER HUB</h1>
                     <div className="subtitle">{title}</div>
+                    {/* 项目选择器 */}
+                    <div className="project-selector">
+                        <button
+                            className="project-select-btn"
+                            onClick={() => setShowProjectSelector(!showProjectSelector)}
+                        >
+                            <span>📚 {currentProject?.title || '选择项目'}</span>
+                            <span className="dropdown-arrow">▼</span>
+                        </button>
+                        {showProjectSelector && (
+                            <div className="project-dropdown">
+                                <div className="project-list">
+                                    {projects.map(p => (
+                                        <div
+                                            key={p.path}
+                                            className={`project-item ${p.is_active ? 'active' : ''}`}
+                                            onClick={() => {
+                                                if (!p.is_active) {
+                                                    handleSwitchProject(p.path)
+                                                }
+                                                setShowProjectSelector(false)
+                                            }}
+                                        >
+                                            <div className="project-name">{p.title}</div>
+                                            <div className="project-meta">
+                                                {p.genre} · 第{p.current_chapter}/{p.target_chapters}章
+                                            </div>
+                                            {p.is_active && <span className="active-badge">当前</span>}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="project-actions">
+                                    <button
+                                        className="btn btn-primary btn-sm"
+                                        onClick={() => {
+                                            setShowProjectSelector(false)
+                                            setShowCreateProjectModal(true)
+                                        }}
+                                    >
+                                        + 新建书籍
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <nav className="sidebar-nav">
                     {NAV_ITEMS.map(item => (
@@ -60,6 +211,122 @@ export default function App() {
                     {connected ? '实时同步中' : '未连接'}
                 </div>
             </aside>
+
+            {/* 新建项目模态框 */}
+            {showCreateProjectModal && (
+                <div className="modal-overlay" onClick={() => setShowCreateProjectModal(false)}>
+                    <div className="modal-content modal-lg" onClick={e => e.stopPropagation()}>
+                        <h3>📖 新建书籍项目</h3>
+                        <div className="form-grid">
+                            <div className="form-group form-group-full">
+                                <label>书名 *</label>
+                                <input
+                                    type="text"
+                                    value={newProjectForm.title}
+                                    onChange={e => setNewProjectForm(f => ({ ...f, title: e.target.value }))}
+                                    placeholder="如：凡人修仙传"
+                                />
+                            </div>
+
+                            {/* 题材选择 */}
+                            <div className="form-group">
+                                <label>主题材 *</label>
+                                <select
+                                    value={newProjectForm.mainGenre}
+                                    onChange={e => {
+                                        const mainGenre = e.target.value
+                                        setNewProjectForm(f => ({
+                                            ...f,
+                                            mainGenre,
+                                            subGenre: '', // 切换主题材时清空副题材
+                                        }))
+                                    }}
+                                >
+                                    <option value="">请选择主题材...</option>
+                                    {Object.entries(GENRE_CATEGORIES).map(([category, genres]) => (
+                                        <optgroup key={category} label={category}>
+                                            {genres.map(g => (
+                                                <option key={g} value={g}>{g}</option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label>副题材（可选）</label>
+                                <select
+                                    value={newProjectForm.subGenre}
+                                    onChange={e => setNewProjectForm(f => ({ ...f, subGenre: e.target.value }))}
+                                    disabled={!newProjectForm.mainGenre}
+                                >
+                                    <option value="">无副题材</option>
+                                    {Object.entries(GENRE_CATEGORIES).map(([category, genres]) => {
+                                        // 过滤掉已选的主题材
+                                        const availableGenres = genres.filter(g => g !== newProjectForm.mainGenre)
+                                        if (availableGenres.length === 0) return null
+                                        return (
+                                            <optgroup key={category} label={category}>
+                                                {availableGenres.map(g => (
+                                                    <option key={g} value={g}>{g}</option>
+                                                ))}
+                                            </optgroup>
+                                        )
+                                    })}
+                                </select>
+                            </div>
+
+                            {/* 题材预览 */}
+                            <div className="form-group form-group-full">
+                                <div className="genre-preview">
+                                    <span className="genre-preview-label">最终题材：</span>
+                                    <span className="genre-preview-value">
+                                        {getFullGenre() || '请选择主题材'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>主角姓名</label>
+                                <input
+                                    type="text"
+                                    value={newProjectForm.protagonist_name}
+                                    onChange={e => setNewProjectForm(f => ({ ...f, protagonist_name: e.target.value }))}
+                                    placeholder="如：韩立"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label>目标章节数</label>
+                                <input
+                                    type="number"
+                                    value={newProjectForm.target_chapters}
+                                    onChange={e => setNewProjectForm(f => ({ ...f, target_chapters: parseInt(e.target.value) || 600 }))}
+                                    placeholder="600"
+                                />
+                            </div>
+                        </div>
+                        <div className="modal-actions">
+                            <button className="btn btn-secondary" onClick={() => setShowCreateProjectModal(false)}>取消</button>
+                            <button
+                                className="btn btn-success"
+                                onClick={handleCreateProject}
+                                disabled={!newProjectForm.title || !newProjectForm.mainGenre}
+                            >
+                                创建项目
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 切换中遮罩 */}
+            {isSwitching && (
+                <div className="modal-overlay">
+                    <div className="loading-modal">
+                        <div className="spinner"></div>
+                        <p>正在切换项目...</p>
+                    </div>
+                </div>
+            )}
 
             <main className="main-content">
                 {page === 'dashboard' && <DashboardPage data={projectInfo} key={refreshKey} />}
