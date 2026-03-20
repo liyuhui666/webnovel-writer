@@ -139,3 +139,91 @@ export function subscribeSSE(onMessage, handlers = {}) {
     };
     return () => es.close();
 }
+
+// ===========================================================
+// 风格配置相关 API
+// ===========================================================
+
+/**
+ * 获取可用的写作风格列表
+ * @returns {Promise<object>} - 风格列表
+ */
+export async function getAvailableStyles() {
+    return fetchJSON('/api/styles/available');
+}
+
+/**
+ * 获取当前项目的风格配置
+ * @returns {Promise<object>} - 风格配置
+ */
+export async function getStyleConfig() {
+    return fetchJSON('/api/styles/config');
+}
+
+/**
+ * 更新当前项目的风格配置
+ * @param {object} config - 风格配置
+ * @param {string} config.primary - 主风格ID
+ * @param {boolean} config.intelligence_enabled - 是否开启智能切换
+ * @param {object} config.scene_adapters - 场景适配规则
+ * @returns {Promise<object>} - 更新结果
+ */
+export async function updateStyleConfig(config) {
+    const url = new URL('/api/styles/config', window.location.origin);
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '更新失败' }));
+        throw new Error(err.detail || `${res.status} ${res.statusText}`);
+    }
+    return res.json();
+}
+
+/**
+ * 为旧项目初始化风格配置
+ * @param {object} options - 初始化选项
+ * @param {string} options.primary - 主风格ID
+ * @param {boolean} options.intelligence_enabled - 是否开启智能切换
+ * @returns {Promise<object>} - 初始化结果
+ */
+export async function initializeStyle(options = {}) {
+    const url = new URL('/api/styles/initialize', window.location.origin);
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(options),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '初始化失败' }));
+        throw new Error(err.detail || `${res.status} ${res.statusText}`);
+    }
+    return res.json();
+}
+
+/**
+ * 快速开关智能风格切换
+ * @param {boolean} enabled - 是否开启
+ * @returns {Promise<object>} - 切换结果
+ */
+export async function toggleIntelligence(enabled) {
+    const url = new URL('/api/styles/toggle-intelligence', window.location.origin);
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '切换失败' }));
+        throw new Error(err.detail || `${res.status} ${res.statusText}`);
+    }
+    return res.json();
+}

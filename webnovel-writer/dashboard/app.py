@@ -29,6 +29,49 @@ _watcher = FileWatcher()
 
 STATIC_DIR = Path(__file__).parent / "frontend" / "dist"
 
+# 全局风格配置缓存
+_writing_styles_cache: dict | None = None
+
+
+def _load_writing_styles() -> dict:
+    """加载全局风格配置"""
+    global _writing_styles_cache
+    if _writing_styles_cache is not None:
+        return _writing_styles_cache
+
+    config_path = Path(__file__).parent.parent / "config" / "writing-styles.json"
+    if config_path.exists():
+        _writing_styles_cache = json.loads(config_path.read_text(encoding="utf-8"))
+    else:
+        _writing_styles_cache = {"styles": [], "scene_types": [], "genre_style_map": {}}
+    return _writing_styles_cache
+
+
+def _get_default_style_config(genre: str) -> dict:
+    """根据题材获取默认风格配置"""
+    styles = _load_writing_styles()
+    genre_map = styles.get("genre_style_map", {})
+    scene_types = styles.get("scene_types", [])
+
+    primary = genre_map.get(genre, "standard")
+
+    # 构建场景适配器
+    adapters = {}
+    for scene in scene_types:
+        adapters[scene["id"]] = {
+            "style": scene.get("default_style", primary),
+            "blend": scene.get("default_blend", 0.8)
+        }
+
+    return {
+        "version": "1.0",
+        "primary": primary,
+        "intelligence": {
+            "enabled": False,  # 旧项目默认关闭
+            "scene_adapters": adapters
+        }
+    }
+
 
 def _get_project_root() -> Path:
     if _project_root is None:
@@ -402,6 +445,11 @@ def create_app(project_root: str | Path | None = None, workspace_root: str | Pat
         golden_finger_name: Optional[str] = ""
         golden_finger_type: Optional[str] = ""
         core_selling_points: Optional[str] = ""
+        # 新增：风格配置
+        writing_style: Optional[dict] = None
+        primary_style: Optional[str] = "standard"
+        intelligence_enabled: Optional[bool] = True
+        scene_adapters: Optional[dict] = None
 
     @app.get("/api/projects/list")
     def list_projects():
@@ -533,6 +581,43 @@ def create_app(project_root: str | Path | None = None, workspace_root: str | Pat
                 core_selling_points=request.core_selling_points or "",
             )
 
+            # 写入风格配置
+            try:
+                state_path = project_dir / ".webnovel" / "state.json"
+                if state_path.exists():
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+                    # 使用请求中的风格配置，或根据题材自动生成
+                    if request.writing_style:
+                        state["project_info"]["writing_style"] = request.writing_style
+                    else:
+                        # 根据primary_style和intelligence设置构建配置
+                        primary = request.primary_style or "standard"
+                        adapters = request.scene_adapters or {}
+
+                        # 如果没有提供适配器，使用默认
+                        if not adapters:
+                            styles = _load_writing_styles()
+                            for scene in styles.get("scene_types", []):
+                                adapters[scene["id"]] = {
+                                    "style": scene.get("default_style", primary),
+                                    "blend": scene.get("default_blend", 0.8)
+                                }
+
+                        state["project_info"]["writing_style"] = {
+                            "version": "1.0",
+                            "primary": primary,
+                            "intelligence": {
+                                "enabled": request.intelligence_enabled if request.intelligence_enabled is not None else True,
+                                "scene_adapters": adapters
+                            }
+                        }
+
+                    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as e:
+                # 风格配置写入失败不影响项目创建
+                print(f"Warning: 写入风格配置失败: {e}")
+
             return {
                 "success": True,
                 "message": f"项目创建成功: {request.title}",
@@ -600,6 +685,125 @@ def create_app(project_root: str | Path | None = None, workspace_root: str | Pat
             return {"success": True, "path": request.path, "message": "文件创建成功"}
         except Exception as e:
             raise HTTPException(500, f"创建文件失败: {e}")
+
+    # ===========================================================
+    # API：风格配置管理
+    # ===========================================================
+
+    @app.get("/api/styles/available")
+    def get_available_styles():
+        """获取可用的写作风格列表"""
+        return _load_writing_styles()
+
+    @app.get("/api/styles/config")
+    def get_style_config():
+        """获取当前项目的风格配置"""
+        state_path = _webnovel_dir() / "state.json"
+        if not state_path.is_file():
+            raise HTTPException(404, "项目状态文件不存在")
+
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            style_config = state.get("project_info", {}).get("writing_style")
+
+            # 如果没有配置，返回 null（旧项目）
+            return {
+                "has_config": style_config is not None,
+                "config": style_config,
+                "available_styles": _load_writing_styles()
+            }
+        except Exception as e:
+            raise HTTPException(500, f"读取风格配置失败: {e}")
+
+    class StyleConfigRequest(BaseModel):
+        primary: str
+        intelligence_enabled: bool
+        scene_adapters: dict
+
+    @app.post("/api/styles/config")
+    def update_style_config(request: StyleConfigRequest):
+        """更新当前项目的风格配置"""
+        state_path = _webnovel_dir() / "state.json"
+        if not state_path.is_file():
+            raise HTTPException(404, "项目状态文件不存在")
+
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+
+            # 构建风格配置
+            style_config = {
+                "version": "1.0",
+                "primary": request.primary,
+                "intelligence": {
+                    "enabled": request.intelligence_enabled,
+                    "scene_adapters": request.scene_adapters
+                }
+            }
+
+            state["project_info"]["writing_style"] = style_config
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            return {"success": True, "config": style_config}
+        except Exception as e:
+            raise HTTPException(500, f"更新风格配置失败: {e}")
+
+    class InitializeStyleRequest(BaseModel):
+        primary: Optional[str] = "standard"
+        intelligence_enabled: Optional[bool] = True
+
+    @app.post("/api/styles/initialize")
+    def initialize_style(request: InitializeStyleRequest):
+        """为旧项目初始化风格配置"""
+        state_path = _webnovel_dir() / "state.json"
+        if not state_path.is_file():
+            raise HTTPException(404, "项目状态文件不存在")
+
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+
+            # 如果已有配置，返回提示
+            if state.get("project_info", {}).get("writing_style"):
+                return {"initialized": False, "message": "风格配置已存在"}
+
+            # 根据题材获取默认配置
+            genre = state.get("project_info", {}).get("genre", "")
+            default_config = _get_default_style_config(genre)
+
+            # 应用用户自定义
+            default_config["primary"] = request.primary or default_config["primary"]
+            default_config["intelligence"]["enabled"] = request.intelligence_enabled if request.intelligence_enabled is not None else False
+
+            state["project_info"]["writing_style"] = default_config
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            return {"initialized": True, "config": default_config}
+        except Exception as e:
+            raise HTTPException(500, f"初始化风格配置失败: {e}")
+
+    class ToggleIntelligenceRequest(BaseModel):
+        enabled: bool
+
+    @app.post("/api/styles/toggle-intelligence")
+    def toggle_intelligence(request: ToggleIntelligenceRequest):
+        """快速开关智能风格切换"""
+        state_path = _webnovel_dir() / "state.json"
+        if not state_path.is_file():
+            raise HTTPException(404, "项目状态文件不存在")
+
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+
+            # 如果没有风格配置，自动初始化
+            if "writing_style" not in state.get("project_info", {}):
+                genre = state.get("project_info", {}).get("genre", "")
+                state["project_info"]["writing_style"] = _get_default_style_config(genre)
+
+            state["project_info"]["writing_style"]["intelligence"]["enabled"] = request.enabled
+            state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            return {"success": True, "enabled": request.enabled}
+        except Exception as e:
+            raise HTTPException(500, f"切换智能风格失败: {e}")
     # ===========================================================
 
     @app.get("/api/events")

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchJSON, subscribeSSE, saveFile, createFile, listProjects, getCurrentProject, switchProject, createProject } from './api.js'
+import { fetchJSON, subscribeSSE, saveFile, createFile, listProjects, getCurrentProject, switchProject, createProject, getAvailableStyles } from './api.js'
 import ForceGraph3D from 'react-force-graph-3d'
 
 // ====================================================================
@@ -37,7 +37,21 @@ export default function App() {
         subGenre: '',
         protagonist_name: '',
         target_chapters: 600,
+        // 新增：风格配置
+        primary_style: 'standard',
+        intelligence_enabled: true,
+        scene_adapters: {},
     })
+
+    // 可用的风格列表
+    const [availableStyles, setAvailableStyles] = useState({ styles: [], scene_types: [], genre_style_map: {} })
+
+    // 加载可用风格
+    useEffect(() => {
+        getAvailableStyles().then(data => {
+            setAvailableStyles(data)
+        }).catch(() => setAvailableStyles({ styles: [], scene_types: [], genre_style_map: {} }))
+    }, [])
 
     // 获取主题材的分类
     const getGenreCategory = (genre) => {
@@ -118,9 +132,29 @@ export default function App() {
         try {
             // 组合主题材和副题材
             const fullGenre = getFullGenre()
+
+            // 构建场景适配器
+            const sceneAdapters = {}
+            if (newProjectForm.intelligence_enabled && availableStyles.scene_types) {
+                availableStyles.scene_types.forEach(scene => {
+                    // 优先使用用户自定义的配置
+                    const userConfig = newProjectForm.scene_adapters[scene.id]
+                    sceneAdapters[scene.id] = {
+                        style: userConfig?.style || scene.default_style || newProjectForm.primary_style,
+                        blend: userConfig?.blend ?? (scene.default_blend || 0.8)
+                    }
+                })
+            }
+
             const result = await createProject({
-                ...newProjectForm,
+                title: newProjectForm.title,
                 genre: fullGenre,
+                protagonist_name: newProjectForm.protagonist_name,
+                target_chapters: newProjectForm.target_chapters,
+                // 风格配置
+                primary_style: newProjectForm.primary_style,
+                intelligence_enabled: newProjectForm.intelligence_enabled,
+                scene_adapters: sceneAdapters,
             })
             setShowCreateProjectModal(false)
             // 重置表单
@@ -130,6 +164,9 @@ export default function App() {
                 subGenre: '',
                 protagonist_name: '',
                 target_chapters: 600,
+                primary_style: 'standard',
+                intelligence_enabled: true,
+                scene_adapters: {},
             })
             // 使用返回的路径切换到新项目
             if (result.path) {
@@ -303,6 +340,94 @@ export default function App() {
                                     placeholder="600"
                                 />
                             </div>
+
+                            {/* 写作风格设置 */}
+                            <div className="form-group form-group-full">
+                                <div className="section-divider">
+                                    <span>写作风格设置</span>
+                                </div>
+                            </div>
+
+                            <div className="form-group">
+                                <label>主风格</label>
+                                <select
+                                    value={newProjectForm.primary_style}
+                                    onChange={e => setNewProjectForm(f => ({ ...f, primary_style: e.target.value }))}
+                                >
+                                    {availableStyles.styles.map(style => (
+                                        <option key={style.id} value={style.id}>
+                                            {style.name} - {style.description}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="form-group checkbox-group">
+                                <label className="checkbox-label">
+                                    <input
+                                        type="checkbox"
+                                        checked={newProjectForm.intelligence_enabled}
+                                        onChange={e => setNewProjectForm(f => ({ ...f, intelligence_enabled: e.target.checked }))}
+                                    />
+                                    <span>启用智能风格切换</span>
+                                </label>
+                            </div>
+
+                            {newProjectForm.intelligence_enabled && (
+                                <div className="form-group form-group-full">
+                                    <div className="scene-adapters-compact">
+                                        <label className="adapters-title">场景适配配置</label>
+                                        <div className="adapters-table">
+                                            {availableStyles.scene_types?.map(scene => {
+                                                const currentStyle = newProjectForm.scene_adapters[scene.id]?.style || scene.default_style || 'standard'
+                                                const currentBlend = newProjectForm.scene_adapters[scene.id]?.blend ?? (scene.default_blend || 0.8)
+                                                return (
+                                                    <div key={scene.id} className="adapter-row-compact">
+                                                        <span className="adapter-name-compact">{scene.name}</span>
+                                                        <select
+                                                            value={currentStyle}
+                                                            onChange={e => {
+                                                                const newAdapters = { ...newProjectForm.scene_adapters }
+                                                                newAdapters[scene.id] = {
+                                                                    ...newAdapters[scene.id],
+                                                                    style: e.target.value
+                                                                }
+                                                                setNewProjectForm(f => ({ ...f, scene_adapters: newAdapters }))
+                                                            }}
+                                                            className="adapter-select-compact"
+                                                        >
+                                                            {availableStyles.styles.map(style => (
+                                                                <option key={style.id} value={style.id}>
+                                                                    {style.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <div className="blend-input-compact">
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                max="100"
+                                                                value={Math.round(currentBlend * 100)}
+                                                                onChange={e => {
+                                                                    const val = parseInt(e.target.value) || 0
+                                                                    const clamped = Math.max(0, Math.min(100, val))
+                                                                    const newAdapters = { ...newProjectForm.scene_adapters }
+                                                                    newAdapters[scene.id] = {
+                                                                        ...newAdapters[scene.id],
+                                                                        blend: clamped / 100
+                                                                    }
+                                                                    setNewProjectForm(f => ({ ...f, scene_adapters: newAdapters }))
+                                                                }}
+                                                            />
+                                                            <span>%</span>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="modal-actions">
                             <button className="btn btn-secondary" onClick={() => setShowCreateProjectModal(false)}>取消</button>

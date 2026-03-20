@@ -1,0 +1,153 @@
+{
+  "version": "1.0",
+  "styles": [
+    {
+      "id": "standard",
+      "name": "标准网文",
+      "description": "现代白话，节奏明快，适合大多数题材",
+      "recommended_genres": ["都市日常", "都市脑洞", "现实题材", "电竞", "直播文"],
+      "features": {
+        "sentence_length": "中等",
+        "rhetoric": "简洁",
+        "verb_strength": "适中",
+        "dialogue_style": "自然口语"
+      }
+    },
+    {
+      "id": "grand-momentum",
+      "name": "磅礴大气",
+      "description": "力度强劲，气势恢宏，适合玄幻战斗",
+      "recommended_genres": ["玄幻修仙", "高武", "西幻", "末世", "无限流"],
+      "features": {
+        "sentence_length": "长短交错",
+        "rhetoric": "排比对偶",
+        "verb_strength": "强烈",
+        "dialogue_style": "简练有力"
+      }
+    },
+    {
+      "id": "gentle-implicit",
+      "name": "婉约含蓄",
+      "description": "细腻柔美，情感丰富，适合言情情感",
+      "recommended_genres": ["青春甜宠", "古言", "现言脑洞", "幻想言情", "职场婚恋"],
+      "features": {
+        "sentence_length": "偏长",
+        "rhetoric": "意象比喻",
+        "verb_strength": "柔和",
+        "dialogue_style": "含蓄委婉"
+      }
+    },
+    {
+      "id": "classical",
+      "name": "文言古风",
+      "description": "仿古文风，典雅庄重，适合历史修仙",
+      "recommended_genres": ["历史古代", "历史脑洞", "修仙", "古言", "宫斗宅斗"],
+      "features": {
+        "sentence_length": "短句为主",
+        "rhetoric": "对偶用典",
+        "verb_strength": "古雅",
+        "dialogue_style": "文言对白"
+      }
+    },
+    {
+      "id": "humorous",
+      "name": "轻松诙谐",
+      "description": "幽默风趣，节奏轻快，适合都市系统",
+      "recommended_genres": ["系统流", "都市异能", "现言脑洞", "直播文", "知乎短篇"],
+      "features": {
+        "sentence_length": "短句为主",
+        "rhetoric": "夸张反讽",
+        "verb_strength": "活泼",
+        "dialogue_style": "吐槽玩梗"
+      }
+    },
+    {
+      "id": "suspense",
+      "name": "悬疑压迫",
+      "description": "紧张压抑，氛围沉重，适合悬疑怪谈",
+      "recommended_genres": ["规则怪谈", "悬疑脑洞", "悬疑灵异", "克苏鲁", "女频悬疑"],
+      "features": {
+        "sentence_length": "短促",
+        "rhetoric": "暗示留白",
+        "verb_strength": "阴郁",
+        "dialogue_style": "简短神秘"
+      }
+    }
+  ],
+  "scene_types": [
+    {
+      "id": "battle",
+      "name": "战斗场景",
+      "description": "打斗、对决、战斗相关场景",
+      "default_style": "grand-momentum",
+      "default_blend": 0.8
+    },
+    {
+      "id": "emotion",
+      "name": "情感场景",
+      "description": "情感交流、内心独白、感情戏",
+      "default_style": "gentle-implicit",
+      "default_blend": 0.9
+    },
+    {
+      "id": "dialogue",
+      "name": "对话场景",
+      "description": "人物对话、交流场景",
+      "default_style": "standard",
+      "default_blend": 1.0
+    },
+    {
+      "id": "description",
+      "name": "描写场景",
+      "description": "环境描写、场景铺陈",
+      "default_style": "standard",
+      "default_blend": 1.0
+    },
+    {
+      "id": "transition",
+      "name": "过渡场景",
+      "description": "章节衔接、时间跳跃",
+      "default_style": "standard",
+      "default_blend": 1.0
+    }
+  ],
+  "genre_style_map": {
+    "玄幻修仙": "grand-momentum",
+    "高武": "grand-momentum",
+    "西幻": "grand-momentum",
+    "末世": "grand-momentum",
+    "无限流": "grand-momentum",
+    "青春甜宠": "gentle-implicit",
+    "古言": "classical",
+    "宫斗宅斗": "classical",
+    "民国言情": "gentle-implicit",
+    "幻想言情": "gentle-implicit",
+    "现言脑洞": "humorous",
+    "职场婚恋": "gentle-implicit",
+    "历史古代": "classical",
+    "历史脑洞": "classical",
+    "系统流": "humorous",
+    "都市异能": "humorous",
+    "都市日常": "standard",
+    "都市脑洞": "humorous",
+    "现实题材": "standard",
+    "黑暗题材": "suspense",
+    "电竞": "standard",
+    "直播文": "humorous",
+    "规则怪谈": "suspense",
+    "悬疑脑洞": "suspense",
+    "悬疑灵异": "suspense",
+    "克苏鲁": "suspense",
+    "知乎短篇": "standard",
+    "种田": "standard",
+    "年代": "standard",
+    "游戏体育": "standard",
+    "抗战谍战": "grand-momentum",
+    "修仙": "grand-momentum",
+    "科幻": "standard",
+    "女频悬疑": "suspense",
+    "狗血言情": "gentle-implicit",
+    "替身文": "gentle-implicit",
+    "多子多福": "gentle-implicit"
+  }
+}
